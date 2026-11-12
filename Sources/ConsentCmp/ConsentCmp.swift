@@ -166,7 +166,7 @@ public final class ConsentCmp {
     @discardableResult
     public func fetchConfig(preferCache: Bool = false) async throws -> ConsentConfig {
         if preferCache, options.cacheConfig, let cached = loadCachedConfig(ttlMs: options.configTtlMs) {
-            appearance = await appearances.fromConfig(storage.get(Keys.config))
+            appearance = await appearances.fromCachedConfig(storage.get(Keys.config))
             cachedConfig = cached
             return cached
         }
@@ -183,7 +183,7 @@ public final class ConsentCmp {
             appearance = await appearances.fromConfig(nil)
             // Mat mang: dung tam ban cache cu de nguoi dung van tra loi duoc.
             if error.httpStatus == 0, let fallback = loadCachedConfig(ttlMs: .greatestFiniteMagnitude) {
-                appearance = await appearances.fromConfig(storage.get(Keys.config))
+                appearance = await appearances.fromCachedConfig(storage.get(Keys.config))
                 cachedConfig = fallback
                 return fallback
             }
