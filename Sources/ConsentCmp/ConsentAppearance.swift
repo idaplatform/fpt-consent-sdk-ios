@@ -64,7 +64,11 @@ struct AppearanceFileStorage: StoragePort {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
     func get(_ key: String) -> String? { try? String(contentsOf: directory.appendingPathComponent(key), encoding: .utf8) }
-    func set(_ key: String, _ value: String) { try? value.write(to: directory.appendingPathComponent(key), atomically: true, encoding: .utf8) }
+    func set(_ key: String, _ value: String) {
+        // Data.write keeps the atomic replace but applies an explicit protection class to the written file.
+        try? Data(value.utf8).write(to: directory.appendingPathComponent(key),
+                                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
     func remove(_ key: String) { try? FileManager.default.removeItem(at: directory.appendingPathComponent(key)) }
 }
 
