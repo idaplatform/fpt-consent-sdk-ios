@@ -76,6 +76,7 @@ public actor AppearanceRepository {
     private var attempted = false
     private var inFlight: Task<ConsentAppearance, Never>?
     private var generation = 0
+    private var resetGeneration = 0
     public init(options: ConsentOptions, http: HttpPort = URLSessionHttp(), storage: StoragePort? = nil) {
         api = ConsentApi(options: options, http: http)
         self.storage = storage ?? AppearanceFileStorage()
@@ -88,28 +89,48 @@ public actor AppearanceRepository {
     public func fromConfig(_ raw: String?) async -> ConsentAppearance {
         await resolve(config: raw, useNetwork: false, force: false)
     }
+    func fromCachedConfig(_ raw: String?) async -> ConsentAppearance {
+        let cached = await resolve(config: nil, useNetwork: false, force: false)
+        if cached.payload["schemaVersion"] as? Int == 1 { return cached }
+        return await fromConfig(raw)
+    }
     public func refresh() async -> ConsentAppearance {
         await resolve(config: nil, useNetwork: true, force: true)
     }
     private func resolve(config: String?, useNetwork: Bool, force: Bool) async -> ConsentAppearance {
-        if let pending = inFlight { return await pending.value }
-        if !force, let current = current { return current }
-        if !force, let raw = storage.get(key), let cached = try? ConsentAppearance.parse(raw) {
-            let restored = await prepareFonts(cached, download: false)
-            current = restored
-            return restored
+        if let pending = inFlight {
+            let waitingGeneration = generation
+            let waitingReset = resetGeneration
+            let result = await pending.value
+            guard waitingReset == resetGeneration else { return current ?? .defaults }
+            if waitingGeneration == generation { current = result; inFlight = nil }
+            if config == nil { return result }
+            // A new config response must not be discarded behind an older in-flight load.
+            return await resolve(config: config, useNetwork: useNetwork, force: force)
         }
-        if !force && attempted { return .defaults }
-        if config == nil && !useNetwork { return .defaults }
-        attempted = true
+        if config == nil, !force, let current = current { return current }
+        let active = current
+        let stored = active == nil ? storage.get(key).flatMap { try? ConsentAppearance.parse($0) } : nil
+        if config == nil, !force, active == nil, stored == nil {
+            if attempted || !useNetwork { return .defaults }
+        }
+        if config != nil || force || stored == nil { attempted = true }
+        generation += 1
         let snapshot = generation
-        let previous = current ?? storage.get(key).flatMap { try? ConsentAppearance.parse($0) } ?? .defaults
         let task = Task<ConsentAppearance, Never> {
+            let previous: ConsentAppearance
+            if let active = active { previous = active }
+            else if let stored = stored { previous = await prepareFonts(stored, download: false) }
+            else { previous = .defaults }
+            if config == nil, !force, active != nil || stored != nil { return previous }
             do {
                 let raw: String
                 if let supplied = config { raw = supplied }
                 else { raw = try await api.fetchConfig().raw }
                 let parsed = try ConsentAppearance.fromConfig(raw)
+                if !force && NSDictionary(dictionary: parsed.payload).isEqual(NSDictionary(dictionary: previous.payload)) {
+                    return previous
+                }
                 let resolved = await prepareFonts(parsed, download: true)
                 if snapshot == generation {
                     let data = try JSONSerialization.data(withJSONObject: parsed.payload)
@@ -124,7 +145,7 @@ public actor AppearanceRepository {
         return result
     }
     public func clear() {
-        generation += 1; inFlight?.cancel(); inFlight = nil
+        resetGeneration += 1; generation += 1; inFlight?.cancel(); inFlight = nil
         storage.remove(key); current = nil; attempted = false
     }
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }

@@ -3,22 +3,24 @@
 The SDK reads `data.appearance` from `GET /consent/config?code_config=...` with
 its existing integration header. Normal form loading shares the content response;
 there is no additional appearance request. Validated schema 1 tokens are persisted
-per base URL, API path and integration key without TTL or background checks.
-Consent content still loads normally, but subsequent responses do not replace a
-cached appearance. Missing/invalid appearance uses defaults without failing consent
-loading. Standalone `getAppearance()` on a cache miss and explicit
-`refreshAppearance()` fetch `/consent/config` to read `data.appearance`.
+per base URL, API path and integration key without TTL. Each successful network
+config response automatically applies and persists a changed valid appearance.
+An unchanged profile reuses prepared fonts and does not rewrite the appearance
+cache. Offline/missing/invalid appearance keeps the last valid profile, or defaults
+when no good cache exists. A later valid config can recover within the same session.
+Cached consent content never downgrades a newer appearance cache. Standalone
+`getAppearance()` on a cache miss fetches config; normal form loading needs no
+additional request or customer controls.
 The native form model applies appearance to SwiftUI and the UIKit hosting controller.
 An explicitly supplied `ConsentTheme` takes precedence over remote colors/shapes.
 
 ```swift
 let appearance = await cmp.getAppearance()
-let refreshed = await cmp.refreshAppearance() // failure preserves the previous profile
-await cmp.clearAppearanceCache()             // does not remove consent or visitor ID
 ```
 
+Refresh/clear remain optional integrator APIs and are not customer-facing buttons.
 Open forms keep their snapshot until loaded again. Offline first loads use SDK
-defaults and retry in the next SDK session. Font assets use public HTTPS URLs and
+defaults; the next successful config response can recover in the same session. Font assets use public HTTPS URLs and
 SHA-256, accept at most four files of 4 MB each, and persist beside the profile.
 Missing/broken fonts fall back to system fonts without network retries. Explicit
 refresh can retry font assets. App-registered fonts use their PostScript name.
